@@ -270,6 +270,19 @@
             )
         `);
 
+        // Tabela de aprovadores por centro de custo
+        db.run(`
+            CREATE TABLE IF NOT EXISTS centro_custo_aprovadores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                centro_custo_id INTEGER NOT NULL,
+                usuario_id INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (centro_custo_id) REFERENCES centros_custo(id),
+                FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+                UNIQUE(centro_custo_id, usuario_id)
+            )
+        `);
+
         // Tabela de retiradas pendentes de confirmação
         db.run(`
             CREATE TABLE IF NOT EXISTS retiradas_pendentes (
@@ -301,6 +314,8 @@
         db.run(`CREATE INDEX IF NOT EXISTS idx_movimentacoes_data ON movimentacoes(data)`);
         db.run(`CREATE INDEX IF NOT EXISTS idx_projetos_nome ON projetos(nome)`);
         db.run(`CREATE INDEX IF NOT EXISTS idx_centros_custo_nome ON centros_custo(nome)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_centro_custo_aprovadores_centro ON centro_custo_aprovadores(centro_custo_id)`);
+        db.run(`CREATE INDEX IF NOT EXISTS idx_centro_custo_aprovadores_usuario ON centro_custo_aprovadores(usuario_id)`);
         db.run(`CREATE INDEX IF NOT EXISTS idx_retiradas_pendentes_item_id ON retiradas_pendentes(item_id)`);
         db.run(`CREATE INDEX IF NOT EXISTS idx_retiradas_pendentes_status ON retiradas_pendentes(status)`);
     });
@@ -848,14 +863,13 @@
     // Funções de requisições
     function criarRequisicao(requisicao) {
         return new Promise((resolve, reject) => {
-            const sql = `INSERT INTO requisicoes (userId, itemId, quantidade, centroCusto, projeto, justificativa, pacoteId) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?)`;
+            const sql = `INSERT INTO requisicoes (userId, itemId, quantidade, centroCusto, justificativa, pacoteId) 
+                        VALUES (?, ?, ?, ?, ?, ?)`;
             db.run(sql, [
                 requisicao.userId,
                 requisicao.itemId,
                 requisicao.quantidade,
                 requisicao.centroCusto,
-                requisicao.projeto,
                 requisicao.justificativa,
                 requisicao.pacoteId || null
             ], function(err) {
@@ -868,12 +882,11 @@
     // Função para criar pacote de requisições
     function criarPacoteRequisicao(pacote) {
         return new Promise((resolve, reject) => {
-            const sql = `INSERT INTO pacotes_requisicao (userId, centroCusto, projeto, justificativa) 
-                        VALUES (?, ?, ?, ?)`;
+            const sql = `INSERT INTO pacotes_requisicao (userId, centroCusto, justificativa) 
+                        VALUES (?, ?, ?)`;
             db.run(sql, [
                 pacote.userId,
                 pacote.centroCusto,
-                pacote.projeto,
                 pacote.justificativa
             ], function(err) {
                 if (err) reject(err);
@@ -1428,11 +1441,34 @@ function criarCentroCusto(centroCusto) {
             if (err) {
                 reject(err);
             } else {
-                resolve({
-                    id: this.lastID,
-                    nome: centroCusto.nome,
-                    descricao: centroCusto.descricao
-                });
+                const centroCustoId = this.lastID;
+                
+                // Se há aprovadores, adicioná-los
+                if (centroCusto.aprovadores && centroCusto.aprovadores.length > 0) {
+                    const promises = centroCusto.aprovadores.map(usuarioId => 
+                        adicionarAprovadorCentroCusto(centroCustoId, usuarioId)
+                    );
+                    
+                    Promise.all(promises)
+                        .then(() => {
+                            resolve({
+                                id: centroCustoId,
+                                nome: centroCusto.nome,
+                                descricao: centroCusto.descricao,
+                                aprovadores: centroCusto.aprovadores
+                            });
+                        })
+                        .catch(err => {
+                            reject(err);
+                        });
+                } else {
+                    resolve({
+                        id: centroCustoId,
+                        nome: centroCusto.nome,
+                        descricao: centroCusto.descricao,
+                        aprovadores: []
+                    });
+                }
             }
         });
     });
@@ -1440,13 +1476,49 @@ function criarCentroCusto(centroCusto) {
 
 function buscarCentrosCusto() {
     return new Promise((resolve, reject) => {
-        const sql = `SELECT * FROM centros_custo WHERE ativo = 1 ORDER BY nome`;
+        const sql = `
+            SELECT cc.*, 
+                   GROUP_CONCAT(u.id) as aprovador_ids,
+                   GROUP_CONCAT(u.name) as aprovador_names,
+                   GROUP_CONCAT(u.email) as aprovador_emails
+            FROM centros_custo cc
+            LEFT JOIN centro_custo_aprovadores cca ON cc.id = cca.centro_custo_id
+            LEFT JOIN usuarios u ON cca.usuario_id = u.id
+            WHERE cc.ativo = 1
+            GROUP BY cc.id
+            ORDER BY cc.nome
+        `;
         
         db.all(sql, [], (err, rows) => {
             if (err) {
                 reject(err);
             } else {
-                resolve(rows);
+                // Processar aprovadores para cada centro de custo
+                const centrosComAprovadores = rows.map(centro => {
+                    let aprovadores = [];
+                    if (centro.aprovador_ids) {
+                        const ids = centro.aprovador_ids.split(',');
+                        const names = centro.aprovador_names.split(',');
+                        const emails = centro.aprovador_emails.split(',');
+                        
+                        aprovadores = ids.map((id, index) => ({
+                            id: parseInt(id),
+                            name: names[index],
+                            email: emails[index]
+                        }));
+                    }
+                    
+                    return {
+                        id: centro.id,
+                        nome: centro.nome,
+                        descricao: centro.descricao,
+                        ativo: centro.ativo,
+                        created_at: centro.created_at,
+                        aprovadores: aprovadores
+                    };
+                });
+                
+                resolve(centrosComAprovadores);
             }
         });
     });
@@ -1480,6 +1552,89 @@ function removerCentroCusto(id) {
             } else {
                 resolve(this.changes);
             }
+        });
+    });
+}
+
+// Funções para gerenciar aprovadores de centros de custo
+function adicionarAprovadorCentroCusto(centroCustoId, usuarioId) {
+    return new Promise((resolve, reject) => {
+        const sql = `
+            INSERT OR IGNORE INTO centro_custo_aprovadores (centro_custo_id, usuario_id)
+            VALUES (?, ?)
+        `;
+        
+        db.run(sql, [centroCustoId, usuarioId], function(err) {
+            if (err) {
+                reject(err);
+            } else {
+                resolve({
+                    id: this.lastID,
+                    centro_custo_id: centroCustoId,
+                    usuario_id: usuarioId
+                });
+            }
+        });
+    });
+}
+
+function removerAprovadorCentroCusto(centroCustoId, usuarioId) {
+    return new Promise((resolve, reject) => {
+        const sql = `DELETE FROM centro_custo_aprovadores WHERE centro_custo_id = ? AND usuario_id = ?`;
+        
+        db.run(sql, [centroCustoId, usuarioId], function(err) {
+            if (err) {
+                reject(err);
+            } else {
+                resolve(this.changes);
+            }
+        });
+    });
+}
+
+function atualizarAprovadoresCentroCusto(centroCustoId, usuarioIds) {
+    return new Promise((resolve, reject) => {
+        db.serialize(() => {
+            db.run('BEGIN TRANSACTION');
+            
+            // Remover todos os aprovadores existentes
+            db.run('DELETE FROM centro_custo_aprovadores WHERE centro_custo_id = ?', [centroCustoId], (err) => {
+                if (err) {
+                    db.run('ROLLBACK');
+                    reject(err);
+                    return;
+                }
+                
+                // Adicionar novos aprovadores
+                if (usuarioIds && usuarioIds.length > 0) {
+                    let promises = [];
+                    usuarioIds.forEach(usuarioId => {
+                        promises.push(new Promise((res, rej) => {
+                            db.run(
+                                'INSERT INTO centro_custo_aprovadores (centro_custo_id, usuario_id) VALUES (?, ?)',
+                                [centroCustoId, usuarioId],
+                                (err) => {
+                                    if (err) rej(err);
+                                    else res();
+                                }
+                            );
+                        }));
+                    });
+                    
+                    Promise.all(promises)
+                        .then(() => {
+                            db.run('COMMIT');
+                            resolve({ success: true });
+                        })
+                        .catch(err => {
+                            db.run('ROLLBACK');
+                            reject(err);
+                        });
+                } else {
+                    db.run('COMMIT');
+                    resolve({ success: true });
+                }
+            });
         });
     });
 }
@@ -1942,14 +2097,13 @@ module.exports = {
     editarQuantidadesPacote,
     
     // Funções de configurações
-    criarProjeto,
-    buscarProjetos,
-    atualizarProjeto,
-    removerProjeto,
     criarCentroCusto,
     buscarCentrosCusto,
     atualizarCentroCusto,
     removerCentroCusto,
+    adicionarAprovadorCentroCusto,
+    removerAprovadorCentroCusto,
+    atualizarAprovadoresCentroCusto,
     
     // Funções de relatórios
     buscarMovimentacoesPorUsuario,

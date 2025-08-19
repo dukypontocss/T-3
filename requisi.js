@@ -57,38 +57,26 @@ async function carregarItensDisponiveis() {
     }
 }
 
-// Carregar projetos e centros de custo para os selects
+// Carregar centros de custo e usuários para os selects
 async function carregarConfiguracoesPacotes() {
     try {
-        // Carregar projetos e centros de custo em paralelo
-        const [projetosResponse, centrosResponse] = await Promise.all([
-            fetch(`${API_URL}/projetos`),
-            fetch(`${API_URL}/centros-custo`)
+        // Carregar centros de custo e usuários em paralelo
+        const [centrosResponse, usuariosResponse] = await Promise.all([
+            fetch(`${API_URL}/centros-custo`),
+            fetch(`${API_URL}/usuarios`)
         ]);
 
         // Verificar respostas
-        if (!projetosResponse.ok) throw new Error('Erro ao carregar projetos');
         if (!centrosResponse.ok) throw new Error('Erro ao carregar centros de custo');
+        if (!usuariosResponse.ok) throw new Error('Erro ao carregar usuários');
 
         // Processar dados
-        const [projetos, centrosCusto] = await Promise.all([
-            projetosResponse.json(),
-            centrosResponse.json()
+        const [centrosCusto, usuariosData] = await Promise.all([
+            centrosResponse.json(),
+            usuariosResponse.json()
         ]);
 
-        // Atualizar select de projetos
-        const projetoSelect = document.getElementById('projeto');
-        if (projetoSelect) {
-            projetoSelect.innerHTML = '<option value="">Selecione um projeto...</option>';
-            projetos.forEach(projeto => {
-                if (projeto.ativo) {
-                    const option = document.createElement('option');
-                    option.value = projeto.nome;
-                    option.textContent = projeto.nome;
-                    projetoSelect.appendChild(option);
-                }
-            });
-        }
+        const usuarios = usuariosData.usuarios || usuariosData;
 
         // Atualizar select de centros de custo
         const centroSelect = document.getElementById('centroCusto');
@@ -99,18 +87,75 @@ async function carregarConfiguracoesPacotes() {
                     const option = document.createElement('option');
                     option.value = centro.nome;
                     option.textContent = centro.nome;
+                    option.dataset.centroCustoId = centro.id;
+                    option.dataset.aprovadores = JSON.stringify(centro.aprovadores || []);
                     centroSelect.appendChild(option);
                 }
+            });
+
+            // Adicionar event listener para atualizar aprovadores automaticamente
+            centroSelect.addEventListener('change', atualizarAprovadoresAutomaticos);
+        }
+
+        // Atualizar select de aprovadores na configuração
+        const aprovadoresSelect = document.getElementById('centroCustoAprovadores');
+        if (aprovadoresSelect) {
+            aprovadoresSelect.innerHTML = '';
+            usuarios.forEach(usuario => {
+                const option = document.createElement('option');
+                option.value = usuario.id;
+                option.textContent = `${usuario.name} (${usuario.email})`;
+                aprovadoresSelect.appendChild(option);
             });
         }
 
         console.log('Configurações carregadas:', {
-            projetos: projetos.length,
-            centrosCusto: centrosCusto.length
+            centrosCusto: centrosCusto.length,
+            usuarios: usuarios.length
         });
     } catch (error) {
         console.error('Erro ao carregar configurações de pacotes:', error);
-        alert('Erro ao carregar projetos e centros de custo. Por favor, recarregue a página.');
+        alert('Erro ao carregar centros de custo e usuários. Por favor, recarregue a página.');
+    }
+}
+
+// Função para atualizar aprovadores automaticamente baseado no centro de custo
+function atualizarAprovadoresAutomaticos() {
+    const centroSelect = document.getElementById('centroCusto');
+    const aprovadoresContainer = document.getElementById('aprovadoresAutomaticos');
+    
+    if (!centroSelect || !aprovadoresContainer) return;
+    
+    const selectedOption = centroSelect.options[centroSelect.selectedIndex];
+    
+    if (!selectedOption || !selectedOption.value) {
+        aprovadoresContainer.innerHTML = '<p class="text-muted">Selecione um centro de custo para ver os aprovadores</p>';
+        return;
+    }
+    
+    try {
+        const aprovadores = JSON.parse(selectedOption.dataset.aprovadores || '[]');
+        
+        if (aprovadores.length === 0) {
+            aprovadoresContainer.innerHTML = '<p class="text-warning">Este centro de custo não possui aprovadores configurados</p>';
+            return;
+        }
+        
+        let html = '<div class="aprovadores-list">';
+        aprovadores.forEach(aprovador => {
+            html += `
+                <div class="aprovador-item">
+                    <i class="fas fa-user-check"></i>
+                    <span>${aprovador.name} (${aprovador.email})</span>
+                </div>
+            `;
+        });
+        html += '</div>';
+        
+        aprovadoresContainer.innerHTML = html;
+    } catch (error) {
+        console.error('Erro ao processar aprovadores:', error);
+        aprovadoresContainer.innerHTML = '<p class="text-danger">Erro ao carregar aprovadores</p>';
     }
 }
 
@@ -280,7 +325,7 @@ function carregarMeusPacotes() {
                     <div style="display: flex; justify-content: space-between; align-items: start;">
                         <div>
                             <h4>Pacote #${pacote.id}</h4>
-                            <p><strong>Projeto:</strong> ${pacote.projeto}</p>
+
                             <p><strong>Centro de Custo:</strong> ${pacote.centroCusto}</p>
                             <p><strong>Justificativa:</strong> ${pacote.justificativa}</p>
                             <p><strong>Itens:</strong> ${pacote.total_itens || 0} • <strong>Total:</strong> ${pacote.total_quantidade || 0} unidades</p>
@@ -400,10 +445,7 @@ function carregarRequisicoesPendentes() {
                                 <span class="info-label">Centro de Custo</span>
                                 <span class="info-value">${pacote.centroCusto}</span>
                             </div>
-                            <div class="info-group">
-                                <span class="info-label">Projeto</span>
-                                <span class="info-value">${pacote.projeto}</span>
-                            </div>
+
                             <div class="info-group">
                                 <span class="info-label">Total de Itens</span>
                                 <span class="info-value">${pacote.total_itens} itens</span>
@@ -656,10 +698,9 @@ function criarPacoteRequisicoes(event) {
     
     const userData = JSON.parse(sessionStorage.getItem('currentUser') || '{}');
     const centroCusto = document.getElementById('centroCusto').value;
-    const projeto = document.getElementById('projeto').value;
     const justificativa = document.getElementById('justificativa').value;
     
-    if (!centroCusto || !projeto || !justificativa) {
+    if (!centroCusto || !justificativa) {
         alert('Preencha todos os campos do pacote!');
         return;
     }
@@ -671,7 +712,6 @@ function criarPacoteRequisicoes(event) {
         body: JSON.stringify({
             userId: userData.id,
             centroCusto,
-            projeto,
             justificativa,
             itens: itensPacoteAtual
         })
@@ -736,14 +776,14 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         
         // Event listeners para formulários de configuração
-        const projetoForm = document.getElementById('projetoForm');
-        if (projetoForm) {
-            projetoForm.addEventListener('submit', criarProjeto);
-        }
-        
         const centroCustoForm = document.getElementById('centroCustoForm');
         if (centroCustoForm) {
             centroCustoForm.addEventListener('submit', criarCentroCusto);
+        }
+        
+        // Carregar centros de custo automaticamente se estiver na seção de configurações
+        if (document.getElementById('config-centros-custo')) {
+            carregarCentrosCusto();
         }
     } catch (error) {
         console.error('Erro na inicialização:', error);
@@ -813,153 +853,14 @@ function showSection(sectionId) {
 
 // Função para mostrar abas de configuração
 function showConfigTab(tabName) {
-    // Ocultar todas as seções
-    document.querySelectorAll('.config-section').forEach(section => {
-        section.classList.remove('active');
-    });
-    
-    // Remover classe active de todos os botões
-    document.querySelectorAll('.config-tab').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    
-    // Mostrar seção selecionada
-    const selectedSection = document.getElementById(`config-${tabName}`);
-    if (selectedSection) {
-        selectedSection.classList.add('active');
-    }
-    
-    // Adicionar classe active no botão correspondente
-    const activeButton = event.target.closest('.config-tab');
-    if (activeButton) {
-        activeButton.classList.add('active');
-    }
-    
-    // Carregar dados da aba selecionada
-    if (tabName === 'projetos') {
-        carregarProjetos();
-    } else if (tabName === 'centros-custo') {
+    // Apenas centros de custo agora - carregar dados
+    if (tabName === 'centros-custo') {
         carregarCentrosCusto();
     }
 }
 
 // Funções para gerenciar projetos
-async function carregarProjetos() {
-    try {
-        const response = await fetch(`${API_URL}/projetos`);
-        if (!response.ok) throw new Error('Erro ao carregar projetos');
-        
-        const projetos = await response.json();
-        const tbody = document.querySelector('#tabelaProjetos tbody');
-        tbody.innerHTML = '';
-        
-        projetos.forEach(projeto => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${projeto.nome}</td>
-                <td>${projeto.descricao || '-'}</td>
-                <td><span class="status-ativo">Ativo</span></td>
-                <td>
-                    <button class="btn btn-sm btn-warning" onclick="editarProjeto(${projeto.id})">Editar</button>
-                    <button class="btn btn-sm btn-danger" onclick="removerProjeto(${projeto.id})">Remover</button>
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-    } catch (error) {
-        console.error('Erro ao carregar projetos:', error);
-        alert('Erro ao carregar projetos');
-    }
-}
 
-async function criarProjeto(event) {
-    event.preventDefault();
-    
-    const nome = document.getElementById('projetoNome').value.trim();
-    const descricao = document.getElementById('projetoDescricao').value.trim();
-    
-    if (!nome) {
-        alert('Nome do projeto é obrigatório');
-        return;
-    }
-    
-    try {
-        const response = await fetch(`${API_URL}/projetos`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nome, descricao })
-        });
-        
-        if (!response.ok) throw new Error('Erro ao criar projeto');
-        
-        const result = await response.json();
-        if (result.success) {
-            alert('Projeto criado com sucesso!');
-            document.getElementById('projetoForm').reset();
-            carregarProjetos();
-        } else {
-            alert(result.message || 'Erro ao criar projeto');
-        }
-    } catch (error) {
-        console.error('Erro ao criar projeto:', error);
-        alert('Erro ao criar projeto');
-    }
-}
-
-async function editarProjeto(id) {
-    const novoNome = prompt('Digite o novo nome do projeto:');
-    if (!novoNome) return;
-    
-    const novaDescricao = prompt('Digite a nova descrição (opcional):');
-    
-    try {
-        const response = await fetch(`${API_URL}/projetos/${id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                nome: novoNome, 
-                descricao: novaDescricao || '', 
-                ativo: 1 
-            })
-        });
-        
-        if (!response.ok) throw new Error('Erro ao atualizar projeto');
-        
-        const result = await response.json();
-        if (result.success) {
-            alert('Projeto atualizado com sucesso!');
-            carregarProjetos();
-        } else {
-            alert(result.message || 'Erro ao atualizar projeto');
-        }
-    } catch (error) {
-        console.error('Erro ao atualizar projeto:', error);
-        alert('Erro ao atualizar projeto');
-    }
-}
-
-async function removerProjeto(id) {
-    if (!confirm('Tem certeza que deseja remover este projeto?')) return;
-    
-    try {
-        const response = await fetch(`${API_URL}/projetos/${id}`, {
-            method: 'DELETE'
-        });
-        
-        if (!response.ok) throw new Error('Erro ao remover projeto');
-        
-        const result = await response.json();
-        if (result.success) {
-            alert('Projeto removido com sucesso!');
-            carregarProjetos();
-        } else {
-            alert(result.message || 'Erro ao remover projeto');
-        }
-    } catch (error) {
-        console.error('Erro ao remover projeto:', error);
-        alert('Erro ao remover projeto');
-    }
-}
 
 // Funções para gerenciar centros de custo
 async function carregarCentrosCusto() {
@@ -973,9 +874,14 @@ async function carregarCentrosCusto() {
         
         centrosCusto.forEach(centro => {
             const row = document.createElement('tr');
+            const aprovadoresTexto = centro.aprovadores && centro.aprovadores.length > 0 
+                ? centro.aprovadores.map(a => a.name).join(', ')
+                : 'Nenhum aprovador';
+            
             row.innerHTML = `
                 <td>${centro.nome}</td>
                 <td>${centro.descricao || '-'}</td>
+                <td>${aprovadoresTexto}</td>
                 <td><span class="status-ativo">Ativo</span></td>
                 <td>
                     <button class="btn btn-sm btn-warning" onclick="editarCentroCusto(${centro.id})">Editar</button>
@@ -995,6 +901,8 @@ async function criarCentroCusto(event) {
     
     const nome = document.getElementById('centroCustoNome').value.trim();
     const descricao = document.getElementById('centroCustoDescricao').value.trim();
+    const aprovadoresSelect = document.getElementById('centroCustoAprovadores');
+    const aprovadores = Array.from(aprovadoresSelect.selectedOptions).map(option => parseInt(option.value)).filter(id => !isNaN(id));
     
     if (!nome) {
         alert('Nome do centro de custo é obrigatório');
@@ -1005,7 +913,7 @@ async function criarCentroCusto(event) {
         const response = await fetch(`${API_URL}/centros-custo`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nome, descricao })
+            body: JSON.stringify({ nome, descricao, aprovadores })
         });
         
         if (!response.ok) throw new Error('Erro ao criar centro de custo');
@@ -1015,6 +923,7 @@ async function criarCentroCusto(event) {
             alert('Centro de custo criado com sucesso!');
             document.getElementById('centroCustoForm').reset();
             carregarCentrosCusto();
+            carregarConfiguracoesPacotes(); // Recarregar para atualizar o select de pacotes
         } else {
             alert(result.message || 'Erro ao criar centro de custo');
         }
@@ -1124,10 +1033,7 @@ async function gerarRelatorioPacote(pacoteId) {
                             <div class="relatorio-info-label">Centro de Custo</div>
                             <div class="relatorio-info-value">${pacote.centroCusto}</div>
                         </div>
-                        <div class="relatorio-info-item">
-                            <div class="relatorio-info-label">Projeto</div>
-                            <div class="relatorio-info-value">${pacote.projeto}</div>
-                        </div>
+
                         ${pacote.aprovador_nome ? `
                         <div class="relatorio-info-item">
                             <div class="relatorio-info-label">Aprovado por</div>
@@ -1219,10 +1125,7 @@ async function editarPacote(pacoteId) {
                                 <span class="relatorio-info-label">Centro de Custo:</span>
                                 <span class="relatorio-info-value">${pacote.centroCusto || 'N/A'}</span>
                             </div>
-                            <div class="relatorio-info-item">
-                                <span class="relatorio-info-label">Projeto:</span>
-                                <span class="relatorio-info-value">${pacote.projeto || 'N/A'}</span>
-                            </div>
+
                             <div class="relatorio-info-item">
                                 <span class="relatorio-info-label">Justificativa:</span>
                                 <span class="relatorio-info-value">${pacote.justificativa || 'N/A'}</span>
@@ -1409,14 +1312,10 @@ function filtrarMeusPacotes() {
         const statusElement = pacote.querySelector('.status-aprovado, .status-rejeitado, .status-pendente, .status-parcialmente-aprovado');
         const status = statusElement ? statusElement.textContent.trim().toLowerCase() : '';
 
-        // Extrair projeto e centro de custo
-        let projeto = '';
+        // Extrair centro de custo
         let centroCusto = '';
         const pTags = pacote.querySelectorAll('p');
         pTags.forEach(p => {
-            if (p.textContent.toLowerCase().includes('projeto:')) {
-                projeto = p.textContent.replace('Projeto:', '').trim().toLowerCase();
-            }
             if (p.textContent.toLowerCase().includes('centro de custo:')) {
                 centroCusto = p.textContent.replace('Centro de Custo:', '').trim().toLowerCase();
             }
@@ -1452,7 +1351,7 @@ function filtrarMeusPacotes() {
         }
 
         // Filtro por pesquisa
-        if (pesquisa && !centroCusto.includes(pesquisa) && !projeto.includes(pesquisa)) {
+        if (pesquisa && !centroCusto.includes(pesquisa)) {
             mostrar = false;
         }
 
@@ -1725,10 +1624,7 @@ function criarCardRetirada(retirada) {
                     <span class="detail-label">Centro de Custo</span>
                     <span class="detail-value">${retirada.centro_custo || 'Não informado'}</span>
                 </div>
-                <div class="detail-item">
-                    <span class="detail-label">Projeto</span>
-                    <span class="detail-value">${retirada.projeto || 'Não informado'}</span>
-                </div>
+
                 <div class="detail-item">
                     <span class="detail-label">Solicitado por</span>
                     <span class="detail-value">${retirada.usuario_nome || 'Não informado'}</span>

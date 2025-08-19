@@ -261,9 +261,9 @@ app.post('/api/unificar-itens', async (req, res) => {
 // Rotas para pacotes de requisições
 app.post('/api/pacotes', async (req, res) => {
     try {
-        const { userId, centroCusto, projeto, justificativa, itens } = req.body;
+        const { userId, centroCusto, justificativa, itens } = req.body;
         
-        if (!userId || !centroCusto || !projeto || !justificativa || !itens || !Array.isArray(itens) || itens.length === 0) {
+        if (!userId || !centroCusto || !justificativa || !itens || !Array.isArray(itens) || itens.length === 0) {
             return res.status(400).json({
                 success: false,
                 message: 'Dados inválidos para criar pacote'
@@ -291,7 +291,6 @@ app.post('/api/pacotes', async (req, res) => {
         const pacoteId = await db.criarPacoteRequisicao({
             userId,
             centroCusto,
-            projeto,
             justificativa
         });
 
@@ -302,7 +301,6 @@ app.post('/api/pacotes', async (req, res) => {
                 itemId: item.id,
                 quantidade: item.quantidade,
                 centroCusto,
-                projeto,
                 justificativa: `PACOTE: ${justificativa}`,
                 pacoteId
             });
@@ -1069,90 +1067,12 @@ app.delete('/api/itens/:id', async (req, res) => {
 
 // ===== NOVAS ROTAS PARA CONFIGURAÇÕES E RELATÓRIOS =====
 
-// Rotas para gerenciar projetos
-app.post('/api/projetos', async (req, res) => {
-    try {
-        const { nome, descricao } = req.body;
-        
-        if (!nome) {
-            return res.status(400).json({
-                success: false,
-                message: 'Nome do projeto é obrigatório'
-            });
-        }
 
-        const projeto = await db.criarProjeto({ nome, descricao });
-        
-        res.json({
-            success: true,
-            projeto,
-            message: 'Projeto criado com sucesso'
-        });
-    } catch (error) {
-        console.error('Erro ao criar projeto:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao criar projeto'
-        });
-    }
-});
-
-app.get('/api/projetos', async (req, res) => {
-    try {
-        const projetos = await db.buscarProjetos();
-        res.json(projetos);
-    } catch (error) {
-        console.error('Erro ao buscar projetos:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao buscar projetos'
-        });
-    }
-});
-
-app.put('/api/projetos/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { nome, descricao, ativo } = req.body;
-        
-        await db.atualizarProjeto(id, { nome, descricao, ativo });
-        
-        res.json({
-            success: true,
-            message: 'Projeto atualizado com sucesso'
-        });
-    } catch (error) {
-        console.error('Erro ao atualizar projeto:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao atualizar projeto'
-        });
-    }
-});
-
-app.delete('/api/projetos/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-        
-        await db.removerProjeto(id);
-        
-        res.json({
-            success: true,
-            message: 'Projeto removido com sucesso'
-        });
-    } catch (error) {
-        console.error('Erro ao remover projeto:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erro ao remover projeto'
-        });
-    }
-});
 
 // Rotas para gerenciar centros de custo
 app.post('/api/centros-custo', async (req, res) => {
     try {
-        const { nome, descricao } = req.body;
+        const { nome, descricao, aprovadores } = req.body;
         
         if (!nome) {
             return res.status(400).json({
@@ -1161,7 +1081,11 @@ app.post('/api/centros-custo', async (req, res) => {
             });
         }
 
-        const centroCusto = await db.criarCentroCusto({ nome, descricao });
+        const centroCusto = await db.criarCentroCusto({ 
+            nome, 
+            descricao, 
+            aprovadores: aprovadores || [] 
+        });
         
         res.json({
             success: true,
@@ -1193,9 +1117,14 @@ app.get('/api/centros-custo', async (req, res) => {
 app.put('/api/centros-custo/:id', async (req, res) => {
     try {
         const { id } = req.params;
-        const { nome, descricao, ativo } = req.body;
+        const { nome, descricao, ativo, aprovadores } = req.body;
         
         await db.atualizarCentroCusto(id, { nome, descricao, ativo });
+        
+        // Atualizar aprovadores se fornecidos
+        if (aprovadores !== undefined) {
+            await db.atualizarAprovadoresCentroCusto(id, aprovadores);
+        }
         
         res.json({
             success: true,

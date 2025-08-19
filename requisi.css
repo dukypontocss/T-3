@@ -542,3 +542,55 @@
     color: #991b1b;
     border: 1px solid #fecaca;
 }
+
+/* Estilos para aprovadores */
+.aprovadores-container {
+    min-height: 60px;
+    padding: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+}
+
+.aprovadores-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.aprovador-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 0.9em;
+}
+
+.aprovador-item i {
+    color: #10b981;
+}
+
+.text-muted {
+    color: #64748b;
+    font-style: italic;
+}
+
+.text-warning {
+    color: #f59e0b;
+    font-weight: 500;
+}
+
+.text-danger {
+    color: #ef4444;
+    font-weight: 500;
+}
+
+.form-help {
+    color: #64748b;
+    font-size: 0.8em;
+    margin-top: 4px;
+    display: block;
+}
