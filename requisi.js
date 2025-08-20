@@ -797,6 +797,9 @@ window.addEventListener('load', function() {
 
 // Função para mostrar seções (atualizada para trabalhar com sidebar)
 function showSection(sectionId) {
+    // Verificar se o sectionId é válido
+    if (!sectionId) return;
+
     // Ocultar todas as seções
     document.querySelectorAll('.content-section').forEach(section => {
         section.classList.remove('active');
@@ -811,12 +814,19 @@ function showSection(sectionId) {
     const section = document.getElementById(sectionId);
     if (section) {
         section.classList.add('active');
-    }
-    
-    // Adicionar classe active no link correspondente
-    const activeLink = event.target.closest('.nav-link');
-    if (activeLink) {
-        activeLink.classList.add('active');
+        
+        // Encontrar e ativar o link correspondente na sidebar
+        const sidebarLink = document.querySelector(`.nav-link[href="#${sectionId}"]`);
+        if (sidebarLink) {
+            sidebarLink.classList.add('active');
+            
+            // Atualizar também o item pai na nav
+            const navItem = sidebarLink.closest('.nav-item');
+            if (navItem) {
+                document.querySelectorAll('.nav-item').forEach(item => item.classList.remove('active'));
+                navItem.classList.add('active');
+            }
+        }
     }
     
     // Fechar sidebar no mobile após navegação
