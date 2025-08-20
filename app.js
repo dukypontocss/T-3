@@ -243,6 +243,8 @@ function filtrarEstoque() {
         let wbsMatch = item.serie && item.serie.toLowerCase().includes(pesquisa);
         let status = 'ideal';
         if (item.quantidade < item.minimo) status = 'abaixo-minimo';
+        // Tudo acima do mínimo é considerado estoque ideal
+        // Tudo acima do mínimo é considerado estoque ideal
         let statusMatch = !statusFiltro || status === statusFiltro;
         // Se pesquisa estiver vazia, mostrar todos
         if (!pesquisa) return statusMatch;
@@ -254,7 +256,7 @@ function filtrarEstoque() {
     } else if (ordenacao === 'quantidade') {
         itensFiltrados.sort((a, b) => (b.quantidade || 0) - (a.quantidade || 0));
     } else if (ordenacao === 'status') {
-        const getStatus = x => (x.quantidade < x.minimo) ? 0 : (x.quantidade < x.ideal) ? 1 : 2;
+        const getStatus = x => (x.quantidade < x.minimo) ? 0 : 1; // 0 = abaixo do mínimo, 1 = estoque ideal
         itensFiltrados.sort((a, b) => getStatus(a) - getStatus(b));
     }
     // Atualiza tabela
@@ -262,7 +264,7 @@ function filtrarEstoque() {
     tbody.innerHTML = '';
     itensFiltrados.forEach(item => {
         const row = tbody.insertRow();
-        let status = 'Ideal';
+        let status = 'Estoque Ideal';
         let statusClass = 'status-ideal';
         if (item.quantidade < item.minimo) {
             status = 'Abaixo do Mínimo';
@@ -380,15 +382,15 @@ async function gerarRelatorioEstoque() {
                             <th>Atual</th>
                             <th>Mínimo</th>
                             <th>Falta</th>
-                            <th>Ideal</th>
-                            <th>Para Ideal</th>
+                            <th>Estoque Ideal</th>
+                            <th>Para Estoque Ideal</th>
                         </tr>
                     </thead>
                     <tbody>
         `;
         itensAbaixoMinimo.forEach(item => {
             const faltaMinimo = item.minimo - item.quantidade;
-            const faltaIdeal = item.ideal - item.quantidade;
+            const faltaEstoqueIdeal = item.ideal - item.quantidade;
             html += `
                 <tr>
                     <td>${item.nome}</td>
@@ -396,7 +398,7 @@ async function gerarRelatorioEstoque() {
                     <td>${item.minimo}</td>
                     <td>${faltaMinimo}</td>
                     <td>${item.ideal}</td>
-                    <td>${faltaIdeal}</td>
+                    <td>${faltaEstoqueIdeal}</td>
                 </tr>
             `;
         });
@@ -821,7 +823,7 @@ window.exportarRelatorio = async function(tipo) {
                 'Quantidade Atual': item.quantidade,
                 'Quantidade Mínima': item.minimo,
                 'Quantidade Ideal': item.ideal,
-                'Status': sanitizar(item.quantidade < item.minimo ? 'Abaixo do Mínimo' : 'Ideal'),
+                'Status': sanitizar(item.quantidade < item.minimo ? 'Abaixo do Mínimo' : 'Estoque Ideal'),
                 'Descrição': sanitizar(item.descricao || '-'),
                 'Origem': sanitizar(item.origem || '-'),
                 'Valor': item.valor || 0,
@@ -1200,7 +1202,7 @@ function carregarMetricasDashboard() {
         .then(data => {
             const totalItens = data.length;
             const itensAbaixoMinimo = data.filter(item => item.quantidade < item.minimo).length;
-            const itensIdeal = data.filter(item => item.quantidade >= item.ideal).length;
+            const itensEstoqueIdeal = data.filter(item => item.quantidade >= item.minimo).length;
             
             // Atualizar cards de métricas
             const totalItensCard = document.getElementById('totalItensCard');
@@ -1209,7 +1211,7 @@ function carregarMetricasDashboard() {
             
             if (totalItensCard) totalItensCard.textContent = totalItens;
             if (itensAbaixoMinimoCard) itensAbaixoMinimoCard.textContent = itensAbaixoMinimo;
-            if (itensIdealCard) itensIdealCard.textContent = itensIdeal;
+            if (itensIdealCard) itensIdealCard.textContent = itensEstoqueIdeal;
             
             // Carregar retiradas de hoje
             carregarRetiradasHoje();
@@ -1290,7 +1292,7 @@ function carregarTopItems() {
                 `;
                 
                 itensCriticos.forEach(item => {
-                    const status = item.quantidade < item.minimo ? 'Crítico' : 'Normal';
+                    const status = item.quantidade < item.minimo ? 'Crítico' : 'Estoque Ideal';
                     const statusClass = item.quantidade < item.minimo ? 'status-baixo' : 'status-ideal';
                     
                     html += `
